@@ -1,0 +1,400 @@
+package computerArchitecture;
+
+import java.util.ArrayList;
+
+public class Simulation {
+	private Memory mem;
+	private RegisterFile reg;
+	private ALU Alu;
+	private Instructions[] pipelineInst;
+	int pipelineCount;
+	boolean flush;
+	int numOfInst;
+	int decodeCycle;
+	int executeCycle;
+	int decodeID;
+	ArrayList<String> decodeQueue;
+	ArrayList<Integer> decodeQueueID;
+
+	public Simulation() {
+		mem = new Memory();
+		reg = new RegisterFile();
+		Alu = new ALU();
+		pipelineInst = new Instructions[4];
+		decodeQueue = new ArrayList<String>();
+		decodeQueueID = new ArrayList<Integer>();
+		pipelineCount = 0;
+		flush = false;
+		numOfInst = mem.getCount();
+		decodeCycle = 0;
+		executeCycle = 0;
+	}
+
+	public void fetch() {
+
+		int pc = reg.getPc();
+		String currentInstruction = mem.readFromMem(pc);
+		decodeQueue.add(currentInstruction);
+		decodeQueueID.add(pc + 1);
+		reg.setPc(++pc);
+
+	}
+
+	public Instructions decode(String currDecode) {
+
+		String opcode = currDecode.substring(0, 4);
+		decodeQueue.remove(currDecode);
+		decodeID = decodeQueueID.get(0);
+		decodeQueueID.remove(0);
+		Instructions toDecode = null;
+
+		// control signals
+		switch (opcode) {
+		case "0000":
+			toDecode = new RFormat(decodeID, currDecode);
+			break;
+		case "0001":
+			toDecode = new RFormat(decodeID, currDecode);
+			break;
+		case "0010":
+			toDecode = new IFormat(decodeID, currDecode);
+			break;
+		case "0011":
+
+			toDecode = new IFormat(decodeID, currDecode);
+			break;
+		case "0100":
+			toDecode = new IFormat(decodeID, currDecode);
+			break;
+		case "0101":
+			toDecode = new IFormat(decodeID, currDecode);
+			break;
+		case "0110":
+			toDecode = new IFormat(decodeID, currDecode);
+			break;
+		case "0111":
+			toDecode = new JFormat(decodeID, currDecode);
+			break;
+		case "1000":
+			toDecode = new RFormat(decodeID, currDecode);
+			break;
+		case "1001":
+			toDecode = new RFormat(decodeID, currDecode);
+			break;
+		case "1010":
+			toDecode = new IFormat(decodeID, currDecode);
+			break;
+		case "1011":
+			toDecode = new IFormat(decodeID, currDecode);
+			break;
+		}
+		toDecode.decode();
+		toDecode.getControlSignals();
+		if (toDecode instanceof RFormat) {
+			RFormat temp = (RFormat) toDecode;
+			temp.readData1 = (reg.getRegister())[temp.R2index];
+			temp.readData2 = (reg.getRegister())[temp.R3index];
+
+		}
+		if (toDecode instanceof IFormat) {
+
+			IFormat temp = (IFormat) toDecode;
+			temp.readData1 = (reg.getRegister())[temp.R2index];
+			temp.readData2 = (reg.getRegister())[temp.R1index];
+
+		}
+		toDecode.stage = "execute";
+		return toDecode;
+
+	}
+
+	public void execute(Instructions currExecute) {
+
+		// currExecute=toDecode;
+
+		if (currExecute instanceof RFormat) {
+			RFormat temp = (RFormat) currExecute;
+			String AluOp = temp.controlSignal.AluOp;// get from dareen
+			if (temp.opcode.equals("0000") || temp.opcode.equals("0001")) {
+
+				temp.AluResult = Alu.execute(temp.readData1, temp.readData2, AluOp);
+
+			} else {
+				if (temp.opcode.equals("1000") || temp.opcode.equals("1001")) {
+					temp.AluResult = Alu.execute(temp.readData1, temp.shamt, AluOp);
+				}
+			}
+		}
+		if (currExecute instanceof JFormat) {
+			JFormat temp = (JFormat) currExecute;
+			String AluOp = temp.controlSignal.AluOp;// get from dareen
+			int pcTemp = 0b11110000000000000000000000000000 & reg.getPc();
+			pcTemp = pcTemp >>> 28;
+			temp.AluResult = Alu.execute(pcTemp, temp.address, AluOp); // check if needed
+			System.out.println("Testing Jump"+ temp.AluResult);
+			
+
+		}
+		if (currExecute instanceof IFormat) {
+			IFormat temp = (IFormat) currExecute;
+			String AluOp = temp.controlSignal.AluOp;// get from dareen
+			if (temp.opcode.equals("0100")) {
+
+				int tempValue = Alu.execute(temp.readData1, temp.readData2, AluOp);
+				if (!Alu.zeroFlag) {
+					temp.AluResult = Alu.execute(temp.ID, temp.Immediate, "000");
+					System.out.println("Flussh"+temp.AluResult);
+
+					// BNE takes place
+
+					temp.intiateFlush = true;
+
+				}
+
+			} else {
+
+				temp.AluResult = Alu.execute(temp.readData1, temp.Immediate, AluOp);
+
+			}
+		}
+
+		currExecute.stage = "memory";
+	}
+
+	public void flushPipeline() {
+		//dont remove inst in writeBack
+		// remove instructions that are in instructions list that came after the bne/j
+		System.out.println("FLUSH IS CALLED");
+		decodeQueue.clear();
+		decodeQueueID.clear();
+		//pipelineInst[0] = null;
+		pipelineInst[1] = null;
+		pipelineInst[2] = null;
+		pipelineInst[3] = null;
+		pipelineCount = 1;
+
+	}
+
+	public void memory(Instructions currMem) {
+
+		if (currMem == null)
+			return;
+
+		if (currMem instanceof IFormat) {
+			IFormat temp = (IFormat) currMem;
+			if (temp.opcode.equals("1010")) {
+				temp.dataFromMem = mem.readFromMem(temp.AluResult);
+
+			}
+			if (temp.opcode.equals("1011")) {
+				if (temp.AluResult >= 1024 && temp.AluResult <= 2047) {
+					mem.writeToMem(temp.AluResult, temp.readData2);
+
+				}
+			}
+			if (temp.opcode.equals("0100") && temp.intiateFlush) {
+				flush = true;
+				reg.setPc(temp.AluResult);
+
+			}
+		}
+		if (currMem instanceof JFormat) {
+			JFormat temp = (JFormat) currMem;
+			flush = true;
+			reg.setPc(temp.AluResult);
+
+		}
+		
+
+		currMem.stage = "writeBack";
+
+	}
+
+	public void writeback(Instructions currWriteBack) {
+
+		if (currWriteBack == null)
+			return;
+
+		if (!((currWriteBack.opcode).equals("0111") || (currWriteBack.opcode).equals("1011") || (currWriteBack.opcode).equals("0100"))) {
+
+			if (currWriteBack instanceof RFormat) {
+				RFormat temp = (RFormat) currWriteBack;
+				if (temp.R1index == 0)
+					return;
+				reg.getRegister()[temp.R1index] = temp.AluResult;
+				System.out.println(
+						"Change in Register file R" + temp.R1index + " content is changed to " + temp.AluResult);
+			}
+			if (currWriteBack instanceof IFormat) {
+
+				IFormat temp = (IFormat) currWriteBack;
+				if (temp.R1index == 0) {
+					return;
+				}
+
+				if (temp.opcode.equals("1010")) {
+					reg.getRegister()[temp.R1index] = Integer.parseInt(temp.dataFromMem, 2);
+					System.out.println("Change in Register file R" + temp.R1index + " content is changed to "
+							+ Integer.parseInt(temp.dataFromMem, 2));
+
+				} else {
+
+						reg.getRegister()[temp.R1index] = temp.AluResult;
+						System.out.println("Change in Register file R" + temp.R1index + " content is changed to "
+								+ temp.AluResult);
+					
+
+				}
+			}
+
+		}
+
+	}
+
+	public boolean PipelineEmpty() {
+		int count = 0;
+		for (int i = 0; i <= 3; i++) {
+			if (pipelineInst[i] != null) {
+				count++;
+			}
+
+		}
+		if (count == 0)
+			return true;
+		else
+			return false;
+
+	}
+
+
+	public boolean toFetch() {
+		// checks if there is a inst to be fetched
+		if (reg.getPc() >= numOfInst) {
+			return false;
+		}
+		return true;
+	}
+
+	public void simulate() {
+		boolean pipelineEmpty = PipelineEmpty();
+		boolean instFetchedB = false;
+		boolean decoding = false;
+		boolean writeBack = false;
+		int decodeTemp = 0;
+		int executeTemp = 0;
+		boolean inExecute = false;
+		boolean inMem = false;
+		boolean inWrite = false;
+
+		for (int i = 1; i <= mem.getNumberOfClockCycles() || !pipelineEmpty; i++) {
+			System.out.println("Clock Cycle: " + i);
+
+			instFetchedB = false;
+			inExecute = false;
+			inMem = false;
+			inWrite = false;
+			Instructions toDecode=null;
+			//flush
+			if(flush) {
+				flushPipeline();
+				//flush=false;
+				decodeTemp=0;
+				executeTemp=0;
+				decodeCycle=0;
+				executeCycle=0;
+			}
+			// fetch every 2 cycles
+			if (i % 2 == 1 && toFetch()) {
+				fetch();
+				System.out.println("Fetch : Instruction " + reg.getPc());
+				instFetchedB = true;
+			} else {
+				System.out.println("Fetch : ");
+			}
+			if (!decodeQueue.isEmpty() && i >= 2 && !flush) {
+				if (decodeCycle == 0) {
+					decodeTemp = decodeQueueID.get(0);
+					System.out.println("Decode1 : Instruction " + decodeTemp + "   " + decodeQueue.get(0));
+					decodeCycle++;
+				} else {
+					if (decodeTemp != 0)
+
+					{
+						toDecode=decode(decodeQueue.get(0));
+						System.out.println("Decode2 : Instruction " + decodeTemp + "   ");
+						decodeTemp = 0;
+						decodeCycle = 0;
+					}
+				}
+			}
+            if(flush) {
+            	flush=false;
+            }
+			for (int j = 0; j <= 3; j++) {
+				Instructions temp = pipelineInst[j];
+
+				if (temp != null) {
+					System.out.println(temp.ID);
+					if (temp.stage.equals("execute") && i >= 4 && !inExecute) {
+						inExecute = true;
+						if (executeCycle == 0) {
+							System.out.println("Execute1 : Instruction " + (temp.ID) + "   " + temp.instruction);
+							executeTemp = temp.ID;
+							executeCycle++;
+						} else {
+							if (executeTemp != 0) {
+								execute(temp);//changes state to memory
+								System.out.println("Execute2 : Instruction " + executeTemp + "   " + temp.instruction);
+								executeCycle = 0;
+								executeTemp = 0;
+							}
+
+						}
+					} else {
+						if (temp.stage.equals("memory") && !instFetchedB && i >= 6 && !inMem) {
+							inMem = true;
+							memory(temp);
+							System.out.println("Memory : Instruction " + temp.ID + "   ");
+
+						} else {
+							if (temp.stage.equals("writeBack") && i >= 7 && !inWrite) {
+								inWrite = true;
+								writeback(temp);
+								System.out.println("WriteBack : Instruction " + temp.ID + "   ");
+								writeBack = true;
+							}
+						}
+					}
+
+				}
+
+			}
+			if(toDecode!=null) {
+				pipelineInst[pipelineCount] =toDecode;
+				pipelineCount++;
+			}
+			if (writeBack) {
+				pipelineInst[0] = null;
+				Instructions[] pipelineTemp=new Instructions[4];
+				for (int m = 0; m <3; m++) {
+					pipelineTemp[m]=pipelineInst[m+1];
+				}
+				pipelineInst=pipelineTemp;
+
+				pipelineCount--;
+				writeBack = false;
+			}
+
+		}
+		reg.printReg();
+		mem.printMem();
+
+	}
+
+	public static void main(String[] args) {
+		Simulation test = new Simulation();
+		test.simulate();
+
+	}
+
+}
